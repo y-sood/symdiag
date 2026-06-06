@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <cmath>
 
-void setup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O, JacobiConfig config, JacobiPartition* vpartition, dim_t tSize[FLA_MAX_ORDER], int seed){   
+void setup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O, const JacobiConfig& config, JacobiPartition* vpartition, dim_t tSize[FLA_MAX_ORDER], int seed){   
     //Setup
     dim_t i;
     int mSize = config.n;
@@ -45,7 +45,7 @@ void setup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O, JacobiCon
 }
 
 //Main diagonalisation loop - With debug prints
-void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O, JacobiConfig config, JacobiPartition* vpartition, dim_t tSize[FLA_MAX_ORDER]){
+void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O, const JacobiConfig& config, JacobiPartition* vpartition, dim_t tSize[FLA_MAX_ORDER]){
     dim_t n = config.n;
     dim_t order = config.order;
     dim_t mSize = config.n;
@@ -102,7 +102,7 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
                     dim_t pqq[3] = {(dim_t)p, (dim_t)q, (dim_t)q}; 
 
                     //Store coefficients to pass (4 values: ppp, qqq, ppq, pqq)
-                    double* A_arr = (double*)malloc(4 * sizeof(double));
+                    double A_arr[4];
                     //Retrieve elements stored at above indices
                     A_arr[0] = get_tensor_element_bccs(*T, ppp, order);
                     A_arr[1] = get_tensor_element_bccs(*T, qqq, order);
@@ -128,8 +128,6 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
                         if(config.debug) printf("Rotation skipped since elements %lf and %lf are insignificant\n", Appq, Aqqp);
                         c = 1.0; s = 0.0;
                     }
-
-                    free(A_arr);
 
                     //FILTER
                     //Embed rotation into G only if significant
@@ -200,6 +198,9 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
 
             //Cleanup G and restart next
             if(config.debug) printf("Cleanup successful, next group\n");
+
+            cleanup_matrix(&G_fac);
+            cleanup_tensor(&G_sttsm);
         }
     }
 }

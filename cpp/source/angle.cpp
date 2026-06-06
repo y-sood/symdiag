@@ -2,13 +2,17 @@
 #include "tensor_utils.hpp"
 #include <cmath>
 
+namespace {
+    constexpr double kCubicEps = 1e-14;
+}
+
 //Returns the roots of a cubic equation with coefficients a, b, c and d
 //Functional only for third order Tensors
 /* ----- CARDANO'S METHOD ----- */
 int solve_cubic(double a, double b, double c, double d, double* roots){
-    if (fabs(a) < 1e-14) {
-        if (fabs(b) < 1e-14) {
-            if (fabs(c) < 1e-14) return 0;
+    if (fabs(a) < kCubicEps) {
+        if (fabs(b) < kCubicEps) {
+            if (fabs(c) < kCubicEps) return 0;
             roots[0] = -d / c;
             return 1;
         }
@@ -31,7 +35,7 @@ int solve_cubic(double a, double b, double c, double d, double* roots){
     
     int num_real = 0;
     
-    if (D > 1e-14) {
+    if (D > kCubicEps) {
         double sqrtD = sqrt(D);
         double S = cbrt(R + sqrtD);
         double T = cbrt(R - sqrtD);

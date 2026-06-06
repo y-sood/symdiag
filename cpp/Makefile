@@ -10,7 +10,7 @@ LDFLAGS =
 LIBS = $(FLAME_STATIC) -lflexiblas -lpthread -lm
 
 TARGET = main
-SRC = main.cpp jacobi_config.cpp tensor_utils.cpp jacobi.cpp reporting.cpp partition.cpp angle.cpp checking.cpp
+SRC = source/main.cpp source/jacobi_config.cpp source/tensor_utils.cpp source/jacobi.cpp source/reporting.cpp source/partition.cpp source/angle.cpp source/checking.cpp
 
 all: $(TARGET)
 

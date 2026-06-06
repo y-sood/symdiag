@@ -7,7 +7,7 @@
 
 // Increment an order-dimensional index in row-major style: idx[0] fastest.
 // Returns 0 when wrapped past the last element (done), 1 otherwise.
-int next_index(dim_t* idx, dim_t order, dim_t n){
+static int next_index(dim_t* idx, dim_t order, dim_t n){
     for (dim_t d = 0; d < order; ++d) {
         idx[d]++;
         if (idx[d] < n) return 1;
@@ -56,18 +56,24 @@ double orthogonality_error_matrix(FLA_Obj U, dim_t n){
     return sqrt(sum_sq);
 }
 
-double diag_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order){
-    double sum_diag_sq = 0.0;
-    dim_t idx[order];
+template <typename F>
+void for_all_indices(dim_t* idx, dim_t order, dim_t n, F&& f) {
     for (dim_t d = 0; d < order; ++d) idx[d] = 0;
+    while (true) {
+        f(idx);
+        if (!next_index(idx, order, n)) break;
+    }
+}
 
-    while (1) {
+double diag_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order) {
+    double sum_diag_sq = 0.0;
+    dim_t idx[FLA_MAX_ORDER]; // or order if you prefer VLAs.
+    for_all_indices(idx, order, n, [&](dim_t* idx){
         if (is_superdiagonal(idx, order)) {
             double val = get_tensor_element_bccs(T, idx, order);
             sum_diag_sq += val * val;
         }
-        if (!next_index(idx, order, n)) break;
-    }
+    });
     return sum_diag_sq;
 }
 
