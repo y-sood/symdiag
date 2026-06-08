@@ -26,6 +26,8 @@ void initSymmTensor(dim_t order, dim_t size[], dim_t b, FLA_Obj* obj);
 void initZeroMatrix(dim_t n, dim_t bC, dim_t bA, FLA_Obj* B);
 void initIdentityDenseMatrix(dim_t n, FLA_Obj* B);
 void initZeroDenseMatrix(dim_t n, FLA_Obj* B);
+void setIdentityMatrix(dim_t n, FLA_Obj* G_sttsm);
+void setIdentityDenseMatrix(dim_t n, FLA_Obj* G_fac);
 void fill_intra_block_symmetry(FLA_Obj T, dim_t order, dim_t block_size);
 void cleanup_tensor(FLA_Obj* T);
 void copy_tensor_values(FLA_Obj src, FLA_Obj dst);

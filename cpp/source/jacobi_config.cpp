@@ -13,10 +13,10 @@ void parse_args(int argc, char** argv, JacobiConfig* config) {
         } else if (strcmp(argv[i], "--max-iters") == 0 && i + 1 < argc) {
             config->n_iterations = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--seed") == 0 && i+1 < argc) {
-            config->print_partition = atoi(argv[++i]);  
+            config->seed = atoi(argv[++i]);  
         } else if (strcmp(argv[i], "--debug") == 0) {
             config->debug = true;
-        } else if (strcmp(argv[i], "--print-initial-tensor") == 0) {
+        } else if (strcmp(argv[i], "--printi-initial-tensor") == 0) {
             config->print_initial_tensor = true;
         } else if (strcmp(argv[i], "--print-final-tensor") == 0) {
             config->print_final_tensor = true;

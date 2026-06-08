@@ -253,7 +253,7 @@ void reconstruct_m( FLA_Obj Ddiag, FLA_Obj Udense, FLA_Obj Trec, dim_t n){
             }
         }
     }
-    dump_canonical_elements("reconstructed", Trec, n, 3);
+    //dump_canonical_elements("reconstructed", Trec, n, 3);
 }
 
 void check_diagonalization_with_reconstruction(FLA_Obj T_final, FLA_Obj U_final, FLA_Obj T_initial, FLA_Obj D_diag, FLA_Obj T_reconstructed, dim_t n, dim_t order, double tolerance) {

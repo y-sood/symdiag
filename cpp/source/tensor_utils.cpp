@@ -319,6 +319,20 @@ void initZeroDenseMatrix(dim_t n, FLA_Obj* B){
     FLA_Set(FLA_ZERO, *B);
 }
 
+void setIdentityMatrix(dim_t n, FLA_Obj* G_sttsm){
+    FLA_Set_zero_tensor(*G_sttsm);
+    for(dim_t i=0; i<n; i++){
+            set_matrix_element_bccs(*G_sttsm, i, i, 1.0);
+        }
+}
+
+void setIdentityDenseMatrix(dim_t n, FLA_Obj* G_fac){
+    FLA_Set(FLA_ZERO, *G_fac);
+    for(dim_t i=0; i<n; ++i){
+        set_dense_matrix_element(*G_fac, i, i, 1.0);
+        }
+}
+
 void fill_intra_block_symmetry(FLA_Obj T, dim_t order, dim_t block_size){
     FLA_Obj* buf = (FLA_Obj*)FLA_Obj_base_buffer(T);
     dim_t* outer_stride = FLA_Obj_stride(T);

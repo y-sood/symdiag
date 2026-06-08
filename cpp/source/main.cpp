@@ -78,9 +78,8 @@ int main(int argc, char* argv[]){
     initSymmTensor(config.order, tSize, config.block_size, &T_reconstructed);
     FLA_Set_zero_tensor(T_reconstructed);
 
-
     //Print initial state
-    print_initial_state(&config, A, B, &vpartition, config.n, config.order);
+    if(config.debug) print_initial_state(&config, A, B, &vpartition, config.n, config.order);
 
     // Launch diagonalisation loop (uses B_temp as workspace)
     jacobi_diagonalization(&A, &B, &B_temp, &C, config, &vpartition, tSize);
@@ -88,7 +87,7 @@ int main(int argc, char* argv[]){
     check_diagonalization_with_reconstruction(A, B, A_initial, D_diag, T_reconstructed, config.n, config.order, 1e-6);
     
     //Print final state 
-    print_final_state(&config, A, B, config.n, config.order);
+    if(config.debug) print_final_state(&config, A, B, config.n, config.order);
     
     //All done!
     cleanup_jacobi(&A, &B, &B_temp, &C);

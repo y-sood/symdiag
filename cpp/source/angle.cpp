@@ -65,7 +65,7 @@ double eval_obj(double c, double s, double App, double Aqq, double Apq, double A
 
 //Returns the rotation angle for pivot pair p,q
 //Functional only for third order Tensors
-void calculate_rotation_angle(FLA_Obj T, double* A_arr, dim_t order, double* c_out, double* s_out){
+void calculate_rotation_angle(const FLA_Obj T, const double* A_arr, dim_t order, double* c_out, double* s_out){
     //Retreive elements stored at above indices
     double Appp = A_arr[0];
     double Aqqq = A_arr[1];

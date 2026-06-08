@@ -58,6 +58,11 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
     FLA_Obj alpha = FLA_ONE;
     FLA_Obj beta = FLA_ONE;
 
+    //Givens rotations allocation
+    FLA_Obj G_sttsm, G_fac;
+    initIdentityMatrix(config.n, config.block_size, config.block_size, &G_sttsm); //For STTSM operation
+    initIdentityDenseMatrix(config.n, &G_fac); //For matrix multiplication
+
     //Perform iterations of Jacobi diagonalisation
     for (int iter = 0; iter < config.n_iterations; iter++) {
         //Loop counter
@@ -75,12 +80,11 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
             initSymmTensor(order, tSize, config.block_size, O);
             FLA_Set_zero_tensor(*O);
             if(config.debug) printf("Output tensor created successfully\n");
-
-            //Fresh Givens rotation matrix for this group
-            FLA_Obj G_sttsm, G_fac;
-            initIdentityMatrix(config.n, config.block_size, config.block_size, &G_sttsm); //For STTSM operation
-            initIdentityDenseMatrix(config.n, &G_fac); //For matrix multiplication
             
+            //Reset
+            setIdentityMatrix(n, &G_sttsm);
+            setIdentityDenseMatrix(n, &G_fac);
+
             if(config.debug){ 
                 FLA_Obj_print_matlab("Initialised Givens Rotation Matrix G", G_sttsm);
                 printf("Identity matrix initiated successfully\n");
@@ -116,8 +120,6 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
                     if(fabs(Appq) > 1e-6 || fabs(Aqqp) > 1e-6){
                         //Calculate rotation angle - Works only for third order tensor
                         calculate_rotation_angle(*T, A_arr, order, &c, &s);
-                        if(iter == 0)
-                            printf("ANGLE iter=%d group=%d pair=%d p=%d q=%d c=%.15e s=%.15e\n", iter+1, group+1, pair_idx+1, p, q, c, s);
                         if(config.debug){
                             printf("Rotation angle calculated successfully\n");
                             //Print detailed rotation info
@@ -172,37 +174,29 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
             // positions within canonical blocks, leaving them 0 (from FLA_Set_zero_tensor).
             fill_intra_block_symmetry(*T, order, config.block_size);
             FLA_Copy(*F_temp, *F);
+            
             if(config.debug){ 
                 printf("Copy of tensor successful\n");
                 print_dense_matrix_matlab("F_after copy", *F);
             }
-            // DIAGNOSTIC: compare O (before copy) and T (after copy) for iter=0
-            if (iter == 0) {
-                char lbl_o[32], lbl_t[32];
-                snprintf(lbl_o, sizeof(lbl_o), "O_after_sttsm_g%d", group+1);
-                snprintf(lbl_t, sizeof(lbl_t), "T_after_copy_g%d",  group+1);
-                FLA_Obj_print_matlab(lbl_o, *O);
-                FLA_Obj_print_matlab(lbl_t, *T);
-                //dump_canonical_elements(lbl_o, *O, n, order);
-                //dump_canonical_elements(lbl_t, *T, n, order);
-            }
-
-            double diag_sq = diag_norm_sq_tensor(*T, n, order);
-            double off_sq  = offdiag_norm_sq_tensor(*T, n, order);
-            double frob_sq = diag_sq + off_sq;
-            double ratio   = off_sq / fmax(diag_sq, 1e-300);
-            double rel_off = sqrt(fmax(off_sq, 0.0)) / fmax(sqrt(fmax(frob_sq, 1e-300)), 1e-300);
-            double trace   = tensor_trace_general(*T, n, order);
-
-            printf("GROUP iter=%d group=%d diag_norm_sq=%.15e offdiag_norm_sq=%.15e " "ratio=%.15e rel_offdiag=%.15e trace=%.15e\n", iter+1, group+1, diag_sq, off_sq, ratio, rel_off, trace);
 
             //Cleanup G and restart next
             if(config.debug) printf("Cleanup successful, next group\n");
-
-            cleanup_matrix(&G_fac);
-            cleanup_tensor(&G_sttsm);
         }
+
+        //Calculate norms per iteration
+        double diag_sq = diag_norm_sq_tensor(*T, n, order);
+        double off_sq  = offdiag_norm_sq_tensor(*T, n, order);
+        double frob_sq = diag_sq + off_sq;
+        double ratio   = off_sq / fmax(diag_sq, 1e-300);
+        double rel_off = sqrt(fmax(off_sq, 0.0)) / fmax(sqrt(fmax(frob_sq, 1e-300)), 1e-300);
+        double trace   = tensor_trace_general(*T, n, order);
+        printf("GROUP iter=%d diag_norm_sq=%.15e offdiag_norm_sq=%.15e " "ratio=%.15e rel_offdiag=%.15e trace=%.15e\n", iter+1, diag_sq, off_sq, ratio, rel_off, trace);
     }
+
+    //Cleanup Givens
+    cleanup_matrix(&G_fac);
+    cleanup_tensor(&G_sttsm);
 }
 
 void cleanup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O){
