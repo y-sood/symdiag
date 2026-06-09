@@ -70,7 +70,7 @@ double diag_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order) {
     dim_t idx[FLA_MAX_ORDER]; // or order if you prefer VLAs.
     for_all_indices(idx, order, n, [&](dim_t* idx){
         if (is_superdiagonal(idx, order)) {
-            double val = get_tensor_element_bccs(T, idx, order);
+            double val = get_tensor_element_bccs_alt(T, idx, order);
             sum_diag_sq += val * val;
         }
     });
@@ -83,7 +83,7 @@ double frob_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order){
     for (dim_t d = 0; d < order; ++d) idx[d] = 0;
 
     while (1) {
-        double val = get_tensor_element_bccs(T, idx, order);
+        double val = get_tensor_element_bccs_alt(T, idx, order);
         sum_sq += val * val;
         if (!next_index(idx, order, n)) break;
     }
@@ -100,7 +100,7 @@ double tensor_trace_general(FLA_Obj T, dim_t n, dim_t order) {
 
     for (dim_t i = 0; i < n; ++i) {
         for (dim_t d = 0; d < order; ++d) idx[d] = i;
-        tr += get_tensor_element_bccs(T, idx, order);
+        tr += get_tensor_element_bccs_alt(T, idx, order);
     }
 
     return tr;
@@ -124,7 +124,7 @@ void check_diagonalization(FLA_Obj T, dim_t n, dim_t order, double tolerance){
     for (dim_t d = 0; d < order; ++d) idx[d] = 0;
 
     while (1) {
-        double val = get_tensor_element_bccs(T, idx, order);
+        double val = get_tensor_element_bccs_alt(T, idx, order);
         double abs_val = fabs(val);
 
         if (is_superdiagonal(idx, order)) {
@@ -170,7 +170,7 @@ void check_diagonalization(FLA_Obj T, dim_t n, dim_t order, double tolerance){
     dim_t sample_size = (n < 5) ? n : 5;
     for (dim_t i = 0; i < sample_size; ++i) {
         for (dim_t d = 0; d < order; ++d) idx[d] = i;
-        double v = get_tensor_element_bccs(T, idx, order);
+        double v = get_tensor_element_bccs_alt(T, idx, order);
         printf(" T[%ld", (long)i);
         for (dim_t d = 1; d < order; ++d) printf(",%ld", (long)i);
         printf("] = %.15e\n", v);
@@ -185,7 +185,7 @@ double max_abs_tensor(FLA_Obj T, dim_t n, dim_t order){
     for (dim_t d = 0; d < order; ++d) idx[d] = 0;
 
     while (1) {
-        double val = fabs(get_tensor_element_bccs(T, idx, order));
+        double val = fabs(get_tensor_element_bccs_alt(T, idx, order));
         if (val > max_abs) max_abs = val;
         if (!next_index(idx, order, n)) break;
     }
@@ -199,7 +199,7 @@ void extract_diagonal_tensor(FLA_Obj T, FLA_Obj D, dim_t n, dim_t order){
     dim_t idx[order];
     for (dim_t i = 0; i < n; ++i) {
         for (dim_t d = 0; d < order; ++d) idx[d] = i;
-        double val = get_tensor_element_bccs(T, idx, order);
+        double val = get_tensor_element_bccs_alt(T, idx, order);
         set_tensor_element_bccs(D, idx, order, val);
     }
 }
@@ -213,8 +213,8 @@ void tensor_diff_metrics( FLA_Obj A, FLA_Obj B, dim_t n, dim_t order, double* er
     for (dim_t d = 0; d < order; ++d) idx[d] = 0;
 
     while (1) {
-        double a = get_tensor_element_bccs(A, idx, order);
-        double b = get_tensor_element_bccs(B, idx, order);
+        double a = get_tensor_element_bccs_alt(A, idx, order);
+        double b = get_tensor_element_bccs_alt(B, idx, order);
         double diff = fabs(a - b);
 
         sum_sq += diff * diff;
@@ -242,7 +242,7 @@ void reconstruct_m( FLA_Obj Ddiag, FLA_Obj Udense, FLA_Obj Trec, dim_t n){
                 double s = 0.0;
                 for (dim_t a = 0; a < n; ++a) {
                     didx[0] = a; didx[1] = a; didx[2] = a;
-                    double d  = get_tensor_element_bccs(Ddiag, didx, 3);
+                    double d  = get_tensor_element_bccs_alt(Ddiag, didx, 3);
                     double ui = get_dense_matrix_element(Udense, i, a);
                     double uj = get_dense_matrix_element(Udense, j, a);
                     double uk = get_dense_matrix_element(Udense, k, a);
@@ -273,7 +273,7 @@ void check_diagonalization_with_reconstruction(FLA_Obj T_final, FLA_Obj U_final,
     for (dim_t d = 0; d < order; ++d) idx[d] = 0;
 
     while (1) {
-        double val = get_tensor_element_bccs(T_final, idx, order);
+        double val = get_tensor_element_bccs_alt(T_final, idx, order);
         double abs_val = fabs(val);
 
         if (is_superdiagonal(idx, order)) {

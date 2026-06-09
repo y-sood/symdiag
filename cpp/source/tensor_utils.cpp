@@ -101,7 +101,33 @@ void set_matrix_element_bccs(FLA_Obj G, dim_t row, dim_t col, double value){
     *buffer = value;
 }
 
-double get_tensor_element_bccs(FLA_Obj T, dim_t* index, dim_t order){
+static inline void sort3(dim_t& a, dim_t& b, dim_t& c) {
+    if (a > b) std::swap(a, b);
+    if (b > c) std::swap(b, c);
+    if (a > b) std::swap(a, b);
+}
+
+double get_tensor_element_bccs(FLA_Obj T, dim_t i, dim_t j, dim_t k) {
+    sort3(i, j, k);
+
+    FLA_Obj* blocks = (FLA_Obj*)FLA_Obj_base_buffer(T);
+    dim_t block_size = FLA_Obj_dimsize(blocks[0], 0);
+    dim_t n_blocks_per_mode = FLA_Obj_dimsize(T, 0);
+
+    dim_t bi = i / block_size, bj = j / block_size, bk = k / block_size;
+    dim_t li = i % block_size, lj = j % block_size, lk = k % block_size;
+
+    dim_t linear_block_idx = (bi * n_blocks_per_mode + bj) * n_blocks_per_mode + bk;
+
+    FLA_Obj block_view = blocks[linear_block_idx];
+    block_view.offset[0] = li;
+    block_view.offset[1] = lj;
+    block_view.offset[2] = lk;
+
+    return *(double*)FLA_Obj_tensor_buffer_at_view(block_view);
+}
+
+double get_tensor_element_bccs_alt(FLA_Obj T, dim_t* index, dim_t order){
     // Sort to canonical form for symmetric tensor
     dim_t* canonical_index = (dim_t*)malloc(order * sizeof(dim_t));
     memcpy(canonical_index, index, order * sizeof(dim_t));
@@ -165,7 +191,7 @@ double get_tensor_element_bccs(FLA_Obj T, dim_t* index, dim_t order){
 
 double get_matrix_element(FLA_Obj A, dim_t i, dim_t j){
     dim_t idx[2] = {i, j};
-    return get_tensor_element_bccs(A, idx, 2);
+    return get_tensor_element_bccs_alt(A, idx, 2);
 }
 
 void set_matrix_element(FLA_Obj A, dim_t i, dim_t j, double value){

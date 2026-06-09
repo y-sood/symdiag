@@ -25,8 +25,7 @@ void dump_canonical_elements(const char* label, FLA_Obj T, dim_t n, dim_t order)
     for (dim_t i = 0; i < n; i++)
         for (dim_t j = i; j < n; j++)
             for (dim_t k = j; k < n; k++) {
-                dim_t idx[3] = {i, j, k};
-                double val = get_tensor_element_bccs(T, idx, order);
+                double val = get_tensor_element_bccs(T, i, j, k);
                 printf("T_%s(%ld,%ld,%ld) = %.15e;\n", label, (long)(i+1), (long)(j+1), (long)(k+1), val);
             }
     printf("%%%% END DUMP %s\n\n", label);
@@ -91,18 +90,10 @@ void print_rotation_details(int iter, int group, int pair_idx, int p, int q, dou
         return;
     }
 
-    dim_t p_dim = (dim_t)p;
-    dim_t q_dim = (dim_t)q;
-
-    dim_t idx_ppp[3] = {p_dim, p_dim, p_dim};
-    dim_t idx_qqq[3] = {q_dim, q_dim, q_dim};
-    dim_t idx_ppq[3] = {p_dim, p_dim, q_dim};
-    dim_t idx_pqq[3] = {p_dim, q_dim, q_dim};
-
-    double val_ppp = get_tensor_element_bccs(T, idx_ppp, order);
-    double val_qqq = get_tensor_element_bccs(T, idx_qqq, order);
-    double val_ppq = get_tensor_element_bccs(T, idx_ppq, order);
-    double val_pqq = get_tensor_element_bccs(T, idx_pqq, order);
+    double val_ppp = get_tensor_element_bccs(T, p, p, p);
+    double val_qqq = get_tensor_element_bccs(T, q, q, q);
+    double val_ppq = get_tensor_element_bccs(T, p, p, q);
+    double val_pqq = get_tensor_element_bccs(T, p, q, q);
 
     printf("T_ppp_%d_%d_%d = %.15e; %% T(%d,%d,%d)\n",
            iter + 1, group + 1, pair_idx + 1, val_ppp, p + 1, p + 1, p + 1);

@@ -94,14 +94,9 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
         for (int group = 0; group < vpartition->nr_groups; group++) {
             if(config.debug) printf("    Processing group %d/%d\n", group + 1, vpartition->nr_groups);
 
-            // Re-initialize O completely so FLA_Random_psym_tensor sets up all block pointers
-            // (canonical + non-canonical), then zero for correct STTSM accumulation.
-            // FLA_Set_zero_tensor alone does not clean non-canonical blocks left by prior STTSM.
-            //FLAG
-            cleanup_tensor(O);
-            initSymmTensor(order, tSize, config.block_size, O);
+            //Reset O
             FLA_Set_zero_tensor(*O);
-            if(config.debug) printf("Output tensor created successfully\n");
+            if(config.debug) printf("Output tensor zeroed successfully\n");
             
             //Reset
             setIdentityMatrix(n, &G_sttsm);
@@ -130,10 +125,10 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
                     //Store coefficients to pass (4 values: ppp, qqq, ppq, pqq)
                     double A_arr[4];
                     //Retrieve elements stored at above indices
-                    A_arr[0] = get_tensor_element_bccs(*T, ppp, order);
-                    A_arr[1] = get_tensor_element_bccs(*T, qqq, order);
-                    double Appq = get_tensor_element_bccs(*T, qpp, order);
-                    double Aqqp = get_tensor_element_bccs(*T, pqq, order);
+                    A_arr[0] = get_tensor_element_bccs(*T, p, p, p);
+                    A_arr[1] = get_tensor_element_bccs(*T, q, q, q);
+                    double Appq = get_tensor_element_bccs(*T, p, p, q);
+                    double Aqqp = get_tensor_element_bccs(*T, p, q, q);
                     A_arr[2] = Appq;
                     A_arr[3] = Aqqp;
 
@@ -232,7 +227,6 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
     //Cleanup Givens
     cleanup_matrix(&G_fac);
     cleanup_tensor(&G_sttsm);
-    
 }
 
 void cleanup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O){
