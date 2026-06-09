@@ -6,6 +6,27 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <limits>
+
+static inline bool should_stop(double delta, double ratio, const JacobiConfig& config){
+    bool cond_delta = delta < config.tol_delta;
+    bool cond_ratio = ratio < config.tol_ratio;
+
+    bool stop = false;
+    switch (config.stop_mode) {
+        case StopMode::Delta:  stop = cond_delta; break;
+        case StopMode::Ratio:  stop = cond_ratio; break;
+        case StopMode::Both:   stop = cond_delta && cond_ratio; break;
+        case StopMode::Either: stop = cond_delta || cond_ratio; break;
+        default:               stop = false; break;
+    }
+
+    if (config.require_both) {
+        stop = cond_delta && cond_ratio;
+    }
+
+    return stop;
+}
 
 void setup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O, const JacobiConfig& config, JacobiPartition* vpartition, dim_t tSize[FLA_MAX_ORDER], int seed){   
     //Setup
@@ -63,11 +84,12 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
     initIdentityMatrix(config.n, config.block_size, config.block_size, &G_sttsm); //For STTSM operation
     initIdentityDenseMatrix(config.n, &G_fac); //For matrix multiplication
 
+    double prev_rel_off = std::numeric_limits<double>::infinity();
+    bool converged = false;
+    int performed_iters = 0;
+
     //Perform iterations of Jacobi diagonalisation
     for (int iter = 0; iter < config.n_iterations; iter++) {
-        //Loop counter
-        printf("Jacobi Iteration %d/%d\n", iter + 1, config.n_iterations);
-
         //Loop over disjoint groups of PQ pairs
         for (int group = 0; group < vpartition->nr_groups; group++) {
             if(config.debug) printf("    Processing group %d/%d\n", group + 1, vpartition->nr_groups);
@@ -191,12 +213,26 @@ void jacobi_diagonalization(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O,
         double ratio   = off_sq / fmax(diag_sq, 1e-300);
         double rel_off = sqrt(fmax(off_sq, 0.0)) / fmax(sqrt(fmax(frob_sq, 1e-300)), 1e-300);
         double trace   = tensor_trace_general(*T, n, order);
-        printf("GROUP iter=%d diag_norm_sq=%.15e offdiag_norm_sq=%.15e " "ratio=%.15e rel_offdiag=%.15e trace=%.15e\n", iter+1, diag_sq, off_sq, ratio, rel_off, trace);
+        //Check stopping criteria based on norms
+        double delta = (iter == 0) ? std::numeric_limits<double>::infinity() : fabs(prev_rel_off - rel_off);
+        bool stop = false;
+        if (config.enable_stopping && (iter + 1) >= config.min_iterations) {stop = should_stop(delta, rel_off, config);}
+        //Iteration details
+        printf("SWEEP iter=%d diag_norm_sq=%.15e offdiag_norm_sq=%.15e " "ratio=%.15e rel_offdiag=%.15e delta=%.15e trace=%.15e stop=%d\n", iter + 1, diag_sq, off_sq, ratio, rel_off, delta, trace, (int)stop);
+        //Update parameters for next iteration
+        prev_rel_off = rel_off;
+        performed_iters = iter + 1;
+        //Stop iterations
+        if (stop) { converged = true;
+        printf("Converged at iter %d: delta=%.15e rel_off=%.15e\n", iter + 1, delta, rel_off);
+        break; //End loop
+        }
     }
-
+    printf("Jacobi finished after %d iteration(s), converged=%d\n", performed_iters, (int)converged);
     //Cleanup Givens
     cleanup_matrix(&G_fac);
     cleanup_tensor(&G_sttsm);
+    
 }
 
 void cleanup_jacobi(FLA_Obj* T, FLA_Obj* F, FLA_Obj* F_temp, FLA_Obj* O){

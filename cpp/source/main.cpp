@@ -24,19 +24,9 @@
 #include <string.h>
 
 int main(int argc, char* argv[]){
-    // Test configuration - Default
+    // Test configuration - Uses default
     JacobiConfig config;
     config.order = T_ORDER;
-    config.n = 8;
-    config.block_size = 4;
-    config.n_iterations = 10;
-    config.debug = false;
-    config.print_initial_tensor = false;
-    config.print_final_tensor = false;
-    config.print_factor_matrix = false;
-    config.print_partition = false;
-    config.print_matlab_summary = true; 
-    config.seed = 42;
 
     //Arguments from CLI - Overwrite config
     parse_args(argc, argv, &config);
