@@ -125,14 +125,14 @@ exit_code=%x" \
 }
 
 # ---- parameter grid ----
-NS=(30 40)
-BLOCK_SIZES=(5)
-MAX_ITERS=(10 20)
-SEEDS=(42 43)
+NS=(4 8 12 16 20 24 28 32 36 40 44 48 52)
+BLOCK_SIZES=(4)
+MAX_ITERS=(100)
+SEEDS=(42 0 100)
 TOL_DELTAS=(1e-10)
-TOL_RATIOS=(1e-8)
+TOL_RATIOS=(1e-6)
 MIN_ITERS=(2)
-STOP_MODES=(either both)
+STOP_MODES=(either)
 
 for n in "${NS[@]}"; do
   for bs in "${BLOCK_SIZES[@]}"; do
