@@ -9,8 +9,7 @@ mkdir -p "$OUT_DIR/logs" "$OUT_DIR/time"
 SUMMARY_CSV="$OUT_DIR/summary.csv"
 SWEEPS_CSV="$OUT_DIR/sweeps.csv"
 
-echo "run_id,n,block_size,max_iters,seed,tol_delta,tol_ratio,min_iters,stop_mode,elapsed_s,user_s,sys_s,cpu_percent,maxrss_kb,exit_code,converged,stop_iter,diag_norm_sq,offdiag_norm_sq,frob_norm_sq,ratio,rel_offdiag,trace,avg_diag_abs,avg_offdiag_abs,max_offdiag_abs,orthogonality_error_U_final,reconstruction_error_abs,reconstruction_error_rel,reconstruction_max_abs,reconstruction_max_rel" > "$SUMMARY_CSV"
-
+echo "run_id,n,block_size,max_iters,seed,tol_delta,tol_ratio,min_iters,stop_mode,jacobi_elapsed_s,elapsed_s,user_s,sys_s,cpu_percent,maxrss_kb,exit_code,converged,stop_iter,diag_norm_sq,offdiag_norm_sq,frob_norm_sq,ratio,rel_offdiag,trace,avg_diag_abs,avg_offdiag_abs,max_offdiag_abs,orthogonality_error_U_final,reconstruction_error_abs,reconstruction_error_rel,reconstruction_max_abs,reconstruction_max_rel" > "$SUMMARY_CSV"
 echo "run_id,iter,diag_norm_sq,offdiag_norm_sq,ratio,rel_offdiag,delta,trace,stop" > "$SWEEPS_CSV"
 
 get_metric() {
@@ -62,6 +61,7 @@ run_case() {
     local tol_ratio="$6"
     local min_iters="$7"
     local stop_mode="$8"
+    local jacobi_elapsed_s
 
     local run_id="n${n}_bs${bs}_mi${max_iters}_seed${seed}_td${tol_delta}_tr${tol_ratio}_min${min_iters}_mode${stop_mode}"
     local log_file="$OUT_DIR/logs/${run_id}.log"
@@ -121,7 +121,9 @@ exit_code=%x" \
     reconstruction_max_abs="$(get_metric reconstruction_max_abs "$log_file")"
     reconstruction_max_rel="$(get_metric reconstruction_max_rel "$log_file")"
 
-    echo "$run_id,$n,$bs,$max_iters,$seed,$tol_delta,$tol_ratio,$min_iters,$stop_mode,$elapsed_s,$user_s,$sys_s,$cpu_percent,$maxrss_kb,$exit_code,$converged,$stop_iter,$diag_norm_sq,$offdiag_norm_sq,$frob_norm_sq,$ratio,$rel_offdiag,$trace,$avg_diag_abs,$avg_offdiag_abs,$max_offdiag_abs,$orthogonality_error_U_final,$reconstruction_error_abs,$reconstruction_error_rel,$reconstruction_max_abs,$reconstruction_max_rel" >> "$SUMMARY_CSV"
+    jacobi_elapsed_s="$(get_metric jacobi_elapsed_s "$log_file")"
+
+    echo "$run_id,$n,$bs,$max_iters,$seed,$tol_delta,$tol_ratio,$min_iters,$stop_mode,$jacobi_elapsed_s,$elapsed_s,$user_s,$sys_s,$cpu_percent,$maxrss_kb,$exit_code,$converged,$stop_iter,$diag_norm_sq,$offdiag_norm_sq,$frob_norm_sq,$ratio,$rel_offdiag,$trace,$avg_diag_abs,$avg_offdiag_abs,$max_offdiag_abs,$orthogonality_error_U_final,$reconstruction_error_abs,$reconstruction_error_rel,$reconstruction_max_abs,$reconstruction_max_rel" >> "$SUMMARY_CSV"
 }
 
 # ---- parameter grid ----

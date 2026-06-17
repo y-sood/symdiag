@@ -22,6 +22,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <chrono>
+
 
 int main(int argc, char* argv[]){
     // Test configuration - Uses default
@@ -71,8 +73,19 @@ int main(int argc, char* argv[]){
     //Print initial state
     if(config.debug) print_initial_state(&config, A, B, &vpartition, config.n, config.order);
 
+    // Timing
+    auto jacobi_start = std::chrono::high_resolution_clock::now();
+    
     // Launch diagonalisation loop (uses B_temp as workspace)
     jacobi_diagonalization(&A, &B, &B_temp, &C, config, &vpartition, tSize);
+    
+    // Timing
+    auto jacobi_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> jacobi_duration = jacobi_end - jacobi_start;
+    
+    // Output to the same log file that shell script parses
+    printf("jacobi_elapsed_s = %.10f\n", jacobi_duration.count());
+
     //Verify state of diagonalisation
     check_diagonalization_with_reconstruction(A, B, A_initial, D_diag, T_reconstructed, config.n, config.order, 1e-6);
     

@@ -41,7 +41,7 @@ def read_summary(run_dir):
     path = os.path.join(run_dir, "summary.csv")
     df = pd.read_csv(path)
     numeric_cols = [
-        "n", "block_size", "max_iters", "seed", "tol_delta", "tol_ratio", "min_iters",
+        "n", "block_size", "max_iters", "seed", "tol_delta", "tol_ratio", "min_iters", "jacobi_elapsed_s",
         "elapsed_s", "user_s", "sys_s", "maxrss_kb", "exit_code", "converged", "stop_iter",
         "diag_norm_sq", "offdiag_norm_sq", "frob_norm_sq", "ratio", "rel_offdiag", "trace",
         "avg_diag_abs", "avg_offdiag_abs", "max_offdiag_abs",
@@ -149,7 +149,7 @@ def main():
     title_suffix_block = f" (fixed n = {fixed_n})" if len(block_n_vals) == 1 else ""
 
     mean_line_plot(
-        size_df, "n", "elapsed_s", os.path.join(out_dir, "01_runtime_vs_problem_size.png"),
+        size_df, "n", "jacobi_elapsed_s", os.path.join(out_dir, "01_runtime_vs_problem_size.png"),
         title=f"Runtime vs problem size{title_suffix_size}",
         xlabel="Number of elements per dimension", ylabel="Runtime (s)", yfmt=fmt_seconds, logy=False
     )
@@ -167,7 +167,7 @@ def main():
     )
 
     mean_line_plot(
-        block_df, "block_size", "elapsed_s", os.path.join(out_dir, "04_runtime_vs_block_size.png"),
+        block_df, "block_size", "jacobi_elapsed_s", os.path.join(out_dir, "04_runtime_vs_block_size.png"),
         title=f"Runtime vs block size{title_suffix_block}",
         xlabel="Block size", ylabel="Runtime (s)", yfmt=fmt_seconds, logy=False, annotate_best=True
     )
