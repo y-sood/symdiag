@@ -22,61 +22,71 @@ double get_dense_matrix_element(FLA_Obj A, dim_t i, dim_t j){
 }
 
 void set_tensor_element_bccs(FLA_Obj T, dim_t* index, dim_t order, double value){
-    // Sort to canonical form for symmetric tensor
-    dim_t* canonical_index = (dim_t*)malloc(order * sizeof(dim_t));
+    // Sort to canonical form for symmetric tensor. order is always small
+    // (<= FLA_MAX_ORDER) here, so these are fixed-size stack arrays rather
+    // than per-call mallocs.
+    dim_t canonical_index[FLA_MAX_ORDER];
     memcpy(canonical_index, index, order * sizeof(dim_t));
     std::sort(canonical_index, canonical_index + order);
-    
+
     // Check if tensor is blocked
     if (FLA_Obj_elemtype(T) == FLA_TENSOR) {
         // BCCS: Navigate to correct block first
         FLA_Obj* blocks = (FLA_Obj*)FLA_Obj_base_buffer(T);
-        
+
         // Get block size
         dim_t block_size = FLA_Obj_dimsize(blocks[0], 0);
-        
-        // Calculate which block and local index within block
-        dim_t* block_index = (dim_t*)malloc(order * sizeof(dim_t));
-        dim_t* local_index = (dim_t*)malloc(order * sizeof(dim_t));
-        
-        for (dim_t i = 0; i < order; i++) {
-            block_index[i] = canonical_index[i] / block_size;
-            local_index[i] = canonical_index[i] % block_size;
-        }
-        
-        // Calculate linear block index (row-major)
         dim_t n_blocks_per_mode = FLA_Obj_dimsize(T, 0);
+
+        // Calculate local index within block and linear block index together
+        // (row-major), same computation as before but without the temporary
+        // block_index array.
+        dim_t local_index[FLA_MAX_ORDER];
         dim_t linear_block_idx = 0;
-        dim_t stride = 1;
+        dim_t block_stride = 1;
         for (dim_t i = order; i > 0; i--) {
-            linear_block_idx += block_index[i-1] * stride;
-            stride *= n_blocks_per_mode;
+            dim_t d = i - 1;
+            local_index[d] = canonical_index[d] % block_size;
+            linear_block_idx += (canonical_index[d] / block_size) * block_stride;
+            block_stride *= n_blocks_per_mode;
         }
-        
-        // Get the specific block
+
+        // Direct pointer arithmetic instead of FLA_Obj_tensor_buffer_at_view,
+        // which mallocs+frees a stride array and an offset array on every
+        // call (same fix as apply_group_rotation_cellwise's elem_ptr, order-
+        // general here since this function serves any order).
+        //
+        // FLA_Obj_tensor_buffer_at_view sums over the OBJECT's own .order
+        // field, not the order passed in here - for a plain (non-tensor)
+        // FLA_Obj like the factor matrix F, .order is 0, so the original
+        // always read buffer[0] regardless of index. Match that exactly:
+        // loop to block.order, and for any position beyond what we wrote
+        // into local_index (i.e. i >= order), use the block's own
+        // pre-existing offset[i], since the original only overwrote
+        // offset[0..order-1] via memcpy and left the rest as inherited.
         FLA_Obj block = blocks[linear_block_idx];
-        
-        // Create view with local offset
-        FLA_Obj block_view = block;
-        memcpy(&(block_view.offset[0]), local_index, order * sizeof(dim_t));
-        
-        // Set element in block
-        double* buffer = (double*)FLA_Obj_tensor_buffer_at_view(block_view);
-        *buffer = value;
-        
-        free(canonical_index);
-        free(block_index);
-        free(local_index);
-        
+        dim_t buf_order = block.order;
+        FLA_Base_obj* base = block.base;
+        double* buf = (double*)base->buffer;
+        dim_t offset = 0;
+        for (dim_t i = 0; i < buf_order; i++) {
+            dim_t li = (i < order) ? local_index[i] : block.offset[i];
+            offset += li * base->stride[i];
+        }
+        buf[offset] = value;
+
     } else {
-        // Scalar tensor (non-blocked)
-        FLA_Obj T_view = T;
-        memcpy(&(T_view.offset[0]), canonical_index, order * sizeof(dim_t));
-        
-        double* buffer = (double*)FLA_Obj_tensor_buffer_at_view(T_view);
-        *buffer = value;
-        
-        free(canonical_index);
+        // Scalar tensor (non-blocked). Same .order-vs-order-parameter
+        // subtlety as above.
+        dim_t buf_order = T.order;
+        FLA_Base_obj* base = T.base;
+        double* buf = (double*)base->buffer;
+        dim_t offset = 0;
+        for (dim_t i = 0; i < buf_order; i++) {
+            dim_t idx_val = (i < order) ? canonical_index[i] : T.offset[i];
+            offset += idx_val * base->stride[i];
+        }
+        buf[offset] = value;
     }
 }
 
@@ -128,64 +138,71 @@ double get_tensor_element_bccs(FLA_Obj T, dim_t i, dim_t j, dim_t k) {
 }
 
 double get_tensor_element_bccs_alt(FLA_Obj T, dim_t* index, dim_t order){
-    // Sort to canonical form for symmetric tensor
-    dim_t* canonical_index = (dim_t*)malloc(order * sizeof(dim_t));
+    // Sort to canonical form for symmetric tensor. order is always small
+    // (<= FLA_MAX_ORDER) here, so a fixed-size stack array avoids a
+    // malloc/free on every call (this used to be the dominant cost here -
+    // ~5 mallocs/frees per call between this function's own three temporary
+    // arrays and FLA_Obj_tensor_buffer_at_view's two internal ones, times
+    // up to O(n^4) calls in the checking/reconstruction code - see
+    // OPTIMIZATION_LOG.md).
+    dim_t canonical_index[FLA_MAX_ORDER];
     memcpy(canonical_index, index, order * sizeof(dim_t));
     std::sort(canonical_index, canonical_index + order);
-    
+
     //CHECK IF TENSOR IS BLOCKED
     if (FLA_Obj_elemtype(T) == FLA_TENSOR) {
         //BCCS: Navigate to correct block first
         FLA_Obj* blocks = (FLA_Obj*)FLA_Obj_base_buffer(T);
-        
+
         //Get block size
         dim_t block_size = FLA_Obj_dimsize(blocks[0], 0);
-        
-        //Calculate which block and local index within block
-        dim_t* block_index = (dim_t*)malloc(order * sizeof(dim_t));
-        dim_t* local_index = (dim_t*)malloc(order * sizeof(dim_t));
-        
-        for (dim_t i = 0; i < order; i++) {
-            block_index[i] = canonical_index[i] / block_size;
-            local_index[i] = canonical_index[i] % block_size;
-        }
-        
-        //Calculate linear block index (row-major for now)
         dim_t n_blocks_per_mode = FLA_Obj_dimsize(T, 0);
+
+        // Local index within block and linear block index (row-major),
+        // computed together without a separate block_index array.
+        dim_t local_index[FLA_MAX_ORDER];
         dim_t linear_block_idx = 0;
-        dim_t stride = 1;
+        dim_t block_stride = 1;
         for (dim_t i = order; i > 0; i--) {
-            linear_block_idx += block_index[i-1] * stride;
-            stride *= n_blocks_per_mode;
+            dim_t d = i - 1;
+            local_index[d] = canonical_index[d] % block_size;
+            linear_block_idx += (canonical_index[d] / block_size) * block_stride;
+            block_stride *= n_blocks_per_mode;
         }
-        
-        //Get the specific block
+
+        // Direct pointer arithmetic instead of FLA_Obj_tensor_buffer_at_view.
+        //
+        // FLA_Obj_tensor_buffer_at_view sums over the OBJECT's own .order
+        // field, not the order passed in here - for a plain (non-tensor)
+        // FLA_Obj like the factor matrix F, .order is 0, so the original
+        // always read buffer[0] regardless of index. Match that exactly:
+        // loop to block.order, and for any position beyond what we wrote
+        // into local_index (i.e. i >= order), use the block's own
+        // pre-existing offset[i], since the original only overwrote
+        // offset[0..order-1] via memcpy and left the rest as inherited.
         FLA_Obj block = blocks[linear_block_idx];
-        
-        //Create view with local offset
-        FLA_Obj block_view = block;
-        memcpy(&(block_view.offset[0]), local_index, order * sizeof(dim_t));
-        
-        //Get element from block
-        double* buffer = (double*)FLA_Obj_tensor_buffer_at_view(block_view);
-        double value = *buffer;
-        
-        free(canonical_index);
-        free(block_index);
-        free(local_index);
-        
-        return value;
-        
+        dim_t buf_order = block.order;
+        FLA_Base_obj* base = block.base;
+        double* buf = (double*)base->buffer;
+        dim_t offset = 0;
+        for (dim_t i = 0; i < buf_order; i++) {
+            dim_t li = (i < order) ? local_index[i] : block.offset[i];
+            offset += li * base->stride[i];
+        }
+        return buf[offset];
+
     } else {
-        //Scalar tensor (non-blocked): original code
-        FLA_Obj T_view = T;
-        memcpy(&(T_view.offset[0]), canonical_index, order * sizeof(dim_t));
-        
-        double* buffer = (double*)FLA_Obj_tensor_buffer_at_view(T_view);
-        double value = *buffer;
-        
-        free(canonical_index);
-        return value;
+        //Scalar tensor (non-blocked). Same .order-vs-order-parameter
+        // subtlety as above.
+        dim_t buf_order = T.order;
+        FLA_Base_obj* base = T.base;
+        double* buf = (double*)base->buffer;
+        dim_t offset = 0;
+        for (dim_t i = 0; i < buf_order; i++) {
+            dim_t idx_val = (i < order) ? canonical_index[i] : T.offset[i];
+            offset += idx_val * base->stride[i];
+        }
+        return buf[offset];
     }
 }
 
@@ -267,19 +284,24 @@ void initDiagonalizableTensor(dim_t order, dim_t size[], dim_t b, FLA_Obj* obj, 
     std::vector<double> U;
     gram_schmidt(M, U, n);
 
-    for (int a = 0; a < n; ++a) {
-        for (int bb = 0; bb < n; ++bb) {
-            for (int c = 0; c < n; ++c) {
-                double val = 0.0;
-                for (int r = 0; r < n; ++r) {
-                    val += lambda[r] * U[a * n + r] * U[bb * n + r] * U[c * n + r];
-                }
-                dim_t idx[3] = {(dim_t)a, (dim_t)bb, (dim_t)c};
-                set_tensor_element_bccs(*obj, idx, order, val);
-            }
+    // Fill all n^order index tuples (each canonical position is written by every
+    // permutation, as before). For order 3 this is bit-identical to the old triple loop.
+    dim_t idx[FLA_MAX_ORDER];
+    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
+    while (true) {
+        double val = 0.0;
+        for (int r = 0; r < n; ++r) {
+            double term = lambda[r];
+            for (dim_t d = 0; d < order; ++d) term *= U[idx[d] * n + r];
+            val += term;
         }
+        set_tensor_element_bccs(*obj, idx, order, val);
+        // last index varies fastest (matches the old a,b,c loop nest order)
+        dim_t d = order;
+        while (d > 0 && ++idx[d - 1] == (dim_t)n) idx[--d] = 0;
+        if (d == 0) break;
     }
-} 
+}
 
 void initSymmTensor(dim_t order, dim_t size[], dim_t b, FLA_Obj* obj){
     dim_t i;
@@ -352,50 +374,219 @@ void setIdentityMatrix(dim_t n, FLA_Obj* G_sttsm){
         }
 }
 
-void setIdentityDenseMatrix(dim_t n, FLA_Obj* G_fac){
-    FLA_Set(FLA_ZERO, *G_fac);
-    for(dim_t i=0; i<n; ++i){
-        set_dense_matrix_element(*G_fac, i, i, 1.0);
-        }
-}
-
 void fill_intra_block_symmetry(FLA_Obj T, dim_t order, dim_t block_size){
     FLA_Obj* buf = (FLA_Obj*)FLA_Obj_base_buffer(T);
     dim_t* outer_stride = FLA_Obj_stride(T);
     dim_t nb = FLA_Obj_dimsize(T, 0);
 
-    dim_t ls[3];
+    dim_t ls[FLA_MAX_ORDER];
     ls[0] = 1;
-    ls[1] = block_size;
-    ls[2] = block_size * block_size;
+    for (dim_t m = 1; m < order; m++) ls[m] = ls[m - 1] * block_size;
 
-    for (dim_t bi = 0; bi < nb; bi++)
-    for (dim_t bj = bi; bj < nb; bj++)
-    for (dim_t bk = bj; bk < nb; bk++) {
-        dim_t lin = bi*outer_stride[0] + bj*outer_stride[1] + bk*outer_stride[2];
-        if (!buf[lin].isStored) continue;
-        double* data = (double*)FLA_Obj_base_buffer(buf[lin]);
+    // Stored blocks are the canonical ones: bidx[0] <= bidx[1] <= ... (non-decreasing).
+    dim_t bidx[FLA_MAX_ORDER];
+    for (dim_t m = 0; m < order; m++) bidx[m] = 0;
+    while (true) {
+        dim_t lin = 0;
+        for (dim_t m = 0; m < order; m++) lin += bidx[m] * outer_stride[m];
+        if (buf[lin].isStored) {
+            double* data = (double*)FLA_Obj_base_buffer(buf[lin]);
 
-        for (dim_t r = 0; r < block_size; r++)
-        for (dim_t s = 0; s < block_size; s++)
-        for (dim_t t = 0; t < block_size; t++) {
-            dim_t g0 = bi*block_size + r;
-            dim_t g1 = bj*block_size + s;
-            dim_t g2 = bk*block_size + t;
-            if (g0 <= g1 && g1 <= g2) continue;
+            dim_t lidx[FLA_MAX_ORDER];
+            for (dim_t m = 0; m < order; m++) lidx[m] = 0;
+            while (true) {
+                dim_t g[FLA_MAX_ORDER];
+                bool canonical = true;
+                for (dim_t m = 0; m < order; m++) g[m] = bidx[m] * block_size + lidx[m];
+                for (dim_t m = 1; m < order; m++) if (g[m - 1] > g[m]) { canonical = false; break; }
 
-            dim_t sg[3] = {g0, g1, g2};
-            if (sg[0] > sg[1]) { dim_t tmp = sg[0]; sg[0] = sg[1]; sg[1] = tmp; }
-            if (sg[1] > sg[2]) { dim_t tmp = sg[1]; sg[1] = sg[2]; sg[2] = tmp; }
-            if (sg[0] > sg[1]) { dim_t tmp = sg[0]; sg[0] = sg[1]; sg[1] = tmp; }
+                if (!canonical) {
+                    dim_t sg[FLA_MAX_ORDER];
+                    for (dim_t m = 0; m < order; m++) sg[m] = g[m];
+                    std::sort(sg, sg + order);
+                    dim_t dst = 0, src = 0;
+                    for (dim_t m = 0; m < order; m++) {
+                        dst += lidx[m] * ls[m];
+                        src += (sg[m] - bidx[m] * block_size) * ls[m];
+                    }
+                    data[dst] = data[src];
+                }
 
-            dim_t sr = sg[0] - bi*block_size;
-            dim_t ss = sg[1] - bj*block_size;
-            dim_t st = sg[2] - bk*block_size;
-
-            data[r*ls[0] + s*ls[1] + t*ls[2]] =
-                data[sr*ls[0] + ss*ls[1] + st*ls[2]];
+                dim_t m = order;
+                while (m > 0 && ++lidx[m - 1] == block_size) lidx[--m] = 0;
+                if (m == 0) break;
+            }
         }
+
+        // advance to next non-decreasing block index tuple (last index fastest)
+        dim_t pos = order;
+        while (pos > 0 && bidx[pos - 1] == nb - 1) pos--;
+        if (pos == 0) break;
+        bidx[pos - 1]++;
+        for (dim_t m = pos; m < order; m++) bidx[m] = bidx[pos - 1];
+    }
+}
+
+int build_group_rotation_slots(dim_t n, const int* pair_p, const int* pair_q,
+                                const double* pair_c, const double* pair_s, int num_pairs,
+                                RotSlot* slots_out, double eps_pivot){
+    std::vector<bool> touched(n, false);
+    int num_slots = 0;
+    for (int i = 0; i < num_pairs; i++){
+        if (fabs(pair_s[i]) > eps_pivot){
+            dim_t p = (dim_t)pair_p[i], q = (dim_t)pair_q[i];
+            double c = pair_c[i], s = pair_s[i];
+            // M = G restricted to rows/cols {p,q} = [[c,s],[-s,c]] (T <- T x1 G x2 G x3 G)
+            slots_out[num_slots++] = RotSlot{p, p, q, c, s, -s, c};
+            touched[p] = true;
+            touched[q] = true;
+        }
+    }
+    for (dim_t m = 0; m < n; m++){
+        if (!touched[m]){
+            slots_out[num_slots++] = RotSlot{m, m, m, 1.0, 0.0, 0.0, 1.0};
+        }
+    }
+    std::sort(slots_out, slots_out + num_slots,
+              [](const RotSlot& a, const RotSlot& b){ return a.rep < b.rep; });
+    return num_slots;
+}
+
+void apply_group_rotation_cellwise(FLA_Obj T, const RotSlot* slots, int num_slots){
+    // Fast path for the hot get/set calls below: FLA_Obj_tensor_buffer_at_view
+    // (used by get_tensor_element_bccs/set_tensor_element_bccs) mallocs+frees a
+    // stride array and an offset array on every single call, on top of copying
+    // whole FLA_Obj structs across a non-LTO'd libflame call boundary. Block
+    // layout (block_size, n_blocks_per_mode, and each block's own base pointer
+    // and stride) is invariant for this whole call, so resolve it once here and
+    // index directly with pointer arithmetic instead.
+    FLA_Obj* blocks = (FLA_Obj*)FLA_Obj_base_buffer(T);
+    dim_t block_size = FLA_Obj_dimsize(blocks[0], 0);
+    dim_t n_blocks_per_mode = FLA_Obj_dimsize(T, 0);
+
+    auto elem_ptr = [&](dim_t i, dim_t j, dim_t k) -> double* {
+        sort3(i, j, k);
+        dim_t bi = i / block_size, li = i % block_size;
+        dim_t bj = j / block_size, lj = j % block_size;
+        dim_t bk = k / block_size, lk = k % block_size;
+        dim_t lb = (bi * n_blocks_per_mode + bj) * n_blocks_per_mode + bk;
+        FLA_Base_obj* base = blocks[lb].base;
+        double* buf = (double*)base->buffer;
+        return buf + li * base->stride[0] + lj * base->stride[1] + lk * base->stride[2];
+    };
+
+    for (int si = 0; si < num_slots; si++){
+        for (int sj = si; sj < num_slots; sj++){
+            for (int sk = sj; sk < num_slots; sk++){
+                const RotSlot& Si = slots[si];
+                const RotSlot& Sj = slots[sj];
+                const RotSlot& Sk = slots[sk];
+                // All three slots identity (idx0==idx1, M=I): the cell maps onto
+                // itself unchanged (8 reads of the same element written back
+                // unchanged) - skip it.
+                if (Si.idx0 == Si.idx1 && Sj.idx0 == Sj.idx1 && Sk.idx0 == Sk.idx1) continue;
+                dim_t Ii[2] = {Si.idx0, Si.idx1};
+                dim_t Ij[2] = {Sj.idx0, Sj.idx1};
+                dim_t Ik[2] = {Sk.idx0, Sk.idx1};
+                double Mi[2][2] = {{Si.m00, Si.m01}, {Si.m10, Si.m11}};
+                double Mj[2][2] = {{Sj.m00, Sj.m01}, {Sj.m10, Sj.m11}};
+                double Mk[2][2] = {{Sk.m00, Sk.m01}, {Sk.m10, Sk.m11}};
+
+                // Read all old values for this cell before writing any of them.
+                double old_local[2][2][2];
+                for (int a = 0; a < 2; a++)
+                    for (int b = 0; b < 2; b++)
+                        for (int c2 = 0; c2 < 2; c2++)
+                            old_local[a][b][c2] = *elem_ptr(Ii[a], Ij[b], Ik[c2]);
+
+                double tmp1[2][2][2]; // mode-1
+                for (int a2 = 0; a2 < 2; a2++)
+                    for (int b = 0; b < 2; b++)
+                        for (int c2 = 0; c2 < 2; c2++)
+                            tmp1[a2][b][c2] = Mi[a2][0]*old_local[0][b][c2] + Mi[a2][1]*old_local[1][b][c2];
+
+                double tmp2[2][2][2]; // mode-2
+                for (int a2 = 0; a2 < 2; a2++)
+                    for (int b2 = 0; b2 < 2; b2++)
+                        for (int c2 = 0; c2 < 2; c2++)
+                            tmp2[a2][b2][c2] = Mj[b2][0]*tmp1[a2][0][c2] + Mj[b2][1]*tmp1[a2][1][c2];
+
+                double new_local[2][2][2]; // mode-3
+                for (int a2 = 0; a2 < 2; a2++)
+                    for (int b2 = 0; b2 < 2; b2++)
+                        for (int c2b = 0; c2b < 2; c2b++)
+                            new_local[a2][b2][c2b] = Mk[c2b][0]*tmp2[a2][b2][0] + Mk[c2b][1]*tmp2[a2][b2][1];
+
+                for (int a = 0; a < 2; a++){
+                    for (int b = 0; b < 2; b++){
+                        for (int c2 = 0; c2 < 2; c2++){
+                            *elem_ptr(Ii[a], Ij[b], Ik[c2]) = new_local[a][b][c2];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void apply_group_rotation_cellwise_general(FLA_Obj T, dim_t order, const RotSlot* slots, int num_slots){
+    // Any-order version of apply_group_rotation_cellwise: one cell per non-decreasing
+    // slot tuple (s_0 <= ... <= s_{d-1}), each holding <= 2^d entries. Bit m of the local
+    // mask selects idx1 (else idx0) of slot s_m; mode m is transformed by that slot's 2x2.
+    FLA_Obj* blocks = (FLA_Obj*)FLA_Obj_base_buffer(T);
+    dim_t block_size = FLA_Obj_dimsize(blocks[0], 0);
+    dim_t nb = FLA_Obj_dimsize(T, 0);
+    const int d = (int)order;
+    const int L = 1 << d;
+
+    auto elem_ptr = [&](const dim_t* idx_in) -> double* {
+        dim_t idx[FLA_MAX_ORDER];
+        for (int m = 0; m < d; m++) idx[m] = idx_in[m];
+        std::sort(idx, idx + d);
+        dim_t lb = 0;
+        for (int m = 0; m < d; m++) lb = lb * nb + idx[m] / block_size;
+        FLA_Base_obj* base = blocks[lb].base;
+        double* p = (double*)base->buffer;
+        for (int m = 0; m < d; m++) p += (idx[m] % block_size) * base->stride[m];
+        return p;
+    };
+
+    int sl[FLA_MAX_ORDER];
+    for (int m = 0; m < d; m++) sl[m] = 0;
+    double vals[1 << FLA_MAX_ORDER];
+    double* ptrs[1 << FLA_MAX_ORDER];
+
+    while (true) {
+        bool all_identity = true;
+        for (int m = 0; m < d; m++)
+            if (slots[sl[m]].idx0 != slots[sl[m]].idx1) { all_identity = false; break; }
+
+        if (!all_identity) {
+            for (int mask = 0; mask < L; mask++) {
+                dim_t idx[FLA_MAX_ORDER];
+                for (int m = 0; m < d; m++)
+                    idx[m] = ((mask >> m) & 1) ? slots[sl[m]].idx1 : slots[sl[m]].idx0;
+                ptrs[mask] = elem_ptr(idx);
+                vals[mask] = *ptrs[mask];
+            }
+            for (int m = 0; m < d; m++) {
+                const RotSlot& S = slots[sl[m]];
+                for (int mask = 0; mask < L; mask++) {
+                    if ((mask >> m) & 1) continue;
+                    int hi = mask | (1 << m);
+                    double x0 = vals[mask], x1 = vals[hi];
+                    vals[mask] = S.m00 * x0 + S.m01 * x1;
+                    vals[hi]   = S.m10 * x0 + S.m11 * x1;
+                }
+            }
+            for (int mask = 0; mask < L; mask++) *ptrs[mask] = vals[mask];
+        }
+
+        int pos = d;
+        while (pos > 0 && sl[pos - 1] == num_slots - 1) pos--;
+        if (pos == 0) break;
+        sl[pos - 1]++;
+        for (int m = pos; m < d; m++) sl[m] = sl[pos - 1];
     }
 }
 

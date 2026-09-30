@@ -11,7 +11,7 @@ LDFLAGS =
 LIBS = $(FLAME_STATIC) -lflexiblas -lpthread -lm
 
 TARGET = main
-SRC = source/main.cpp source/jacobi_config.cpp source/tensor_utils.cpp source/jacobi.cpp source/reporting.cpp source/partition.cpp source/angle.cpp source/checking.cpp
+SRC = source/main.cpp source/jacobi_config.cpp source/tensor_utils.cpp source/jacobi.cpp source/reporting.cpp source/partition.cpp source/angle.cpp source/checking.cpp source/tensor_io.cpp
 
 ifeq ($(PROFILE),1)
     CXXFLAGS += -pg -g

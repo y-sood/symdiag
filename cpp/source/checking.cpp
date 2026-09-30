@@ -4,17 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
-
-// Increment an order-dimensional index in row-major style: idx[0] fastest.
-// Returns 0 when wrapped past the last element (done), 1 otherwise.
-static int next_index(dim_t* idx, dim_t order, dim_t n){
-    for (dim_t d = 0; d < order; ++d) {
-        idx[d]++;
-        if (idx[d] < n) return 1;
-        idx[d] = 0;
-    }
-    return 0;
-}
+#include <vector>
 
 double compute_tensor_difference(FLA_Obj A, FLA_Obj B){
     double max_diff = 0.0;
@@ -45,7 +35,7 @@ double orthogonality_error_matrix(FLA_Obj U, dim_t n){
         for (dim_t j = 0; j < n; ++j) {
             double dot = 0.0;
             for (dim_t k = 0; k < n; ++k) {
-                dot += get_matrix_element(U, k, i) * get_matrix_element(U, k, j);
+                dot += get_dense_matrix_element(U, k, i) * get_dense_matrix_element(U, k, j);
             }
             double target = (i == j) ? 1.0 : 0.0;
             double diff = dot - target;
@@ -56,47 +46,77 @@ double orthogonality_error_matrix(FLA_Obj U, dim_t n){
     return sqrt(sum_sq);
 }
 
+// Calls f(idx, weight) once per canonical (non-decreasing) index tuple. weight is the number
+// of distinct permutations of idx = order! / prod(run length!), so sum_canonical weight * g(idx)
+// equals the sum of g over all n^order entries whenever g is permutation-symmetric (as for a
+// symmetric tensor). Visits C(n+order-1, order) tuples instead of n^order.
 template <typename F>
-void for_all_indices(dim_t* idx, dim_t order, dim_t n, F&& f) {
-    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
+static void for_each_canonical(dim_t n, dim_t order, F&& f) {   // f(dim_t* idx, double weight)
+    double fact_order = 1.0;
+    for (dim_t m = 2; m <= order; ++m) fact_order *= (double)m;
+
+    dim_t idx[FLA_MAX_ORDER];
+    for (dim_t m = 0; m < order; ++m) idx[m] = 0;
     while (true) {
-        f(idx);
-        if (!next_index(idx, order, n)) break;
+        double w = fact_order;
+        for (dim_t m = 0; m < order; ) {
+            dim_t run = 1;
+            while (m + run < order && idx[m + run] == idx[m]) ++run;
+            for (dim_t k = 2; k <= run; ++k) w /= (double)k;
+            m += run;
+        }
+        f(idx, w);
+
+        dim_t pos = order;
+        while (pos > 0 && idx[pos - 1] == n - 1) pos--;
+        if (pos == 0) break;
+        idx[pos - 1]++;
+        for (dim_t m = pos; m < order; ++m) idx[m] = idx[pos - 1];
     }
 }
 
+// Superdiagonal only: n entries, no need to enumerate the rest.
 double diag_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order) {
     double sum_diag_sq = 0.0;
-    dim_t idx[FLA_MAX_ORDER]; // or order if you prefer VLAs.
-    for_all_indices(idx, order, n, [&](dim_t* idx){
-        if (is_superdiagonal(idx, order)) {
-            double val = get_tensor_element_bccs_alt(T, idx, order);
-            sum_diag_sq += val * val;
-        }
-    });
+    dim_t idx[FLA_MAX_ORDER];
+    for (dim_t i = 0; i < n; ++i) {
+        for (dim_t d = 0; d < order; ++d) idx[d] = i;
+        double val = get_tensor_element_bccs_alt(T, idx, order);
+        sum_diag_sq += val * val;
+    }
     return sum_diag_sq;
 }
 
 double frob_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order){
     double sum_sq = 0.0;
-    dim_t idx[order];
-    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
-
-    while (1) {
+    for_each_canonical(n, order, [&](dim_t* idx, double w){
         double val = get_tensor_element_bccs_alt(T, idx, order);
-        sum_sq += val * val;
-        if (!next_index(idx, order, n)) break;
-    }
+        sum_sq += w * val * val;
+    });
     return sum_sq;
 }
 
 double offdiag_norm_sq_tensor(FLA_Obj T, dim_t n, dim_t order){
-    return frob_norm_sq_tensor(T, n, order) - diag_norm_sq_tensor(T, n, order);
+    // Not frob_norm_sq_tensor(T,...) - diag_norm_sq_tensor(T,...): once the
+    // off-diagonal mass is small relative to the diagonal, that subtraction
+    // of two nearly-equal O(1) quantities catastrophically cancels to
+    // exactly 0.0 - even while real off-diagonal entries remain (e.g.
+    // max_offdiag_abs ~1e-9). Since this feeds `ratio` in the stopping
+    // check, a spurious exact 0.0 satisfies any tol_ratio and stops the
+    // sweep early. Sum off-diagonal squares directly instead.
+    double sum_offdiag_sq = 0.0;
+    for_each_canonical(n, order, [&](dim_t* idx, double w){
+        if (!is_superdiagonal(idx, order)) {
+            double val = get_tensor_element_bccs_alt(T, idx, order);
+            sum_offdiag_sq += w * val * val;
+        }
+    });
+    return sum_offdiag_sq;
 }
 
 double tensor_trace_general(FLA_Obj T, dim_t n, dim_t order) {
     double tr = 0.0;
-    dim_t idx[order];
+    dim_t idx[FLA_MAX_ORDER];
 
     for (dim_t i = 0; i < n; ++i) {
         for (dim_t d = 0; d < order; ++d) idx[d] = i;
@@ -104,6 +124,31 @@ double tensor_trace_general(FLA_Obj T, dim_t n, dim_t order) {
     }
 
     return tr;
+}
+
+struct EntryStats {
+    double sum_diag_abs = 0.0, sum_offdiag_abs = 0.0, max_offdiag_abs = 0.0;
+    unsigned long long num_diag = 0, num_offdiag = 0;
+};
+
+// Superdiagonal / off-diagonal |entry| statistics over ALL n^order entries, computed from
+// canonical entries only (each weighted by its permutation count).
+static EntryStats entry_stats(FLA_Obj T, dim_t n, dim_t order) {
+    EntryStats st;
+    double total = 1.0;
+    for (dim_t m = 0; m < order; ++m) total *= (double)n;
+    st.num_diag = (unsigned long long)n;
+    st.num_offdiag = (unsigned long long)total - (unsigned long long)n;
+    for_each_canonical(n, order, [&](dim_t* idx, double w){
+        double abs_val = fabs(get_tensor_element_bccs_alt(T, idx, order));
+        if (is_superdiagonal(idx, order)) {
+            st.sum_diag_abs += w * abs_val;
+        } else {
+            st.sum_offdiag_abs += w * abs_val;
+            if (abs_val > st.max_offdiag_abs) st.max_offdiag_abs = abs_val;
+        }
+    });
+    return st;
 }
 
 void compute_tensor_norms(FLA_Obj T, dim_t n, dim_t order, double* diag_norm, double* offdiag_norm){
@@ -114,30 +159,11 @@ void compute_tensor_norms(FLA_Obj T, dim_t n, dim_t order, double* diag_norm, do
 }
 
 void check_diagonalization(FLA_Obj T, dim_t n, dim_t order, double tolerance){
-    double sum_offdiag_abs = 0.0;
-    double sum_diag_abs = 0.0;
-    double max_offdiag_abs = 0.0;
-    unsigned long long num_offdiag = 0;
-    unsigned long long num_diag = 0;
-
-    dim_t idx[order];
-    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
-
-    while (1) {
-        double val = get_tensor_element_bccs_alt(T, idx, order);
-        double abs_val = fabs(val);
-
-        if (is_superdiagonal(idx, order)) {
-            sum_diag_abs += abs_val;
-            num_diag++;
-        } else {
-            sum_offdiag_abs += abs_val;
-            num_offdiag++;
-            if (abs_val > max_offdiag_abs) max_offdiag_abs = abs_val;
-        }
-
-        if (!next_index(idx, order, n)) break;
-    }
+    EntryStats st = entry_stats(T, n, order);
+    double sum_offdiag_abs = st.sum_offdiag_abs, sum_diag_abs = st.sum_diag_abs;
+    double max_offdiag_abs = st.max_offdiag_abs;
+    unsigned long long num_offdiag = st.num_offdiag, num_diag = st.num_diag;
+    dim_t idx[FLA_MAX_ORDER];
 
     double avg_offdiag = (num_offdiag > 0) ? sum_offdiag_abs / (double)num_offdiag : 0.0;
     double avg_diag = (num_diag > 0) ? sum_diag_abs / (double)num_diag : 0.0;
@@ -161,10 +187,10 @@ void check_diagonalization(FLA_Obj T, dim_t n, dim_t order, double tolerance){
     printf("avg_offdiag_over_avg_diag = %.15e\n", offdiag_ratio_abs);
     printf("max_offdiag_abs = %.15e\n", max_offdiag_abs);
 
-    if (max_offdiag_abs < tolerance)
-        printf("diagonalization_check = PASS (max_offdiag_abs < %.2e)\n", tolerance);
+    if (max_offdiag_abs < tolerance * sqrt(frob_norm_sq))
+        printf("diagonalization_check = PASS (max_offdiag_abs < %.2e * ||T||_F)\n", tolerance);
     else
-        printf("diagonalization_check = FAIL (max_offdiag_abs >= %.2e)\n", tolerance);
+        printf("diagonalization_check = FAIL (max_offdiag_abs >= %.2e * ||T||_F)\n", tolerance);
 
     printf("\nSample diagonal elements:\n");
     dim_t sample_size = (n < 5) ? n : 5;
@@ -181,15 +207,10 @@ void check_diagonalization(FLA_Obj T, dim_t n, dim_t order, double tolerance){
 
 double max_abs_tensor(FLA_Obj T, dim_t n, dim_t order){
     double max_abs = 0.0;
-    dim_t idx[order];
-    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
-
-    while (1) {
+    for_each_canonical(n, order, [&](dim_t* idx, double){
         double val = fabs(get_tensor_element_bccs_alt(T, idx, order));
         if (val > max_abs) max_abs = val;
-        if (!next_index(idx, order, n)) break;
-    }
-
+    });
     return max_abs;
 }
 
@@ -209,22 +230,17 @@ void tensor_diff_metrics( FLA_Obj A, FLA_Obj B, dim_t n, dim_t order, double* er
     double max_diff = 0.0;
     double max_ref = 0.0;
 
-    dim_t idx[order];
-    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
-
-    while (1) {
+    for_each_canonical(n, order, [&](dim_t* idx, double w){
         double a = get_tensor_element_bccs_alt(A, idx, order);
         double b = get_tensor_element_bccs_alt(B, idx, order);
         double diff = fabs(a - b);
 
-        sum_sq += diff * diff;
+        sum_sq += w * diff * diff;
         if (diff > max_diff) max_diff = diff;
 
         double abs_ref = fabs(b);
         if (abs_ref > max_ref) max_ref = abs_ref;
-
-        if (!next_index(idx, order, n)) break;
-    }
+    });
 
     *err_abs = sqrt(sum_sq);
     *err_rel = (*err_abs) / fmax(sqrt(frob_norm_sq_tensor(B, n, order)), 1e-300);
@@ -232,61 +248,37 @@ void tensor_diff_metrics( FLA_Obj A, FLA_Obj B, dim_t n, dim_t order, double* er
     *max_rel = max_diff / fmax(max_ref, 1e-300);
 }
 
-void reconstruct_m( FLA_Obj Ddiag, FLA_Obj Udense, FLA_Obj Trec, dim_t n){
+void reconstruct_m( FLA_Obj Ddiag, FLA_Obj Udense, FLA_Obj Trec, dim_t n, dim_t order){
     FLA_Set_zero_tensor(Trec);
 
-    dim_t idx[3], didx[3];
-    for (dim_t i = 0; i < n; ++i) {
-        for (dim_t j = i; j < n; ++j) {
-            for (dim_t k = j; k < n; ++k) {
-                double s = 0.0;
-                for (dim_t a = 0; a < n; ++a) {
-                    didx[0] = a; didx[1] = a; didx[2] = a;
-                    double d  = get_tensor_element_bccs_alt(Ddiag, didx, 3);
-                    double ui = get_dense_matrix_element(Udense, i, a);
-                    double uj = get_dense_matrix_element(Udense, j, a);
-                    double uk = get_dense_matrix_element(Udense, k, a);
-                    s += d * ui * uj * uk;
-                }
-                idx[0] = i; idx[1] = j; idx[2] = k;
-                set_tensor_element_bccs(Trec, idx, 3, s);
-            }
+    // One entry per canonical (non-decreasing) index tuple; set_tensor_element_bccs
+    // canonicalizes anyway. For order 3 this is the old i<=j<=k triple loop.
+    dim_t idx[FLA_MAX_ORDER], didx[FLA_MAX_ORDER];
+    for (dim_t m = 0; m < order; ++m) idx[m] = 0;
+    while (true) {
+        double s = 0.0;
+        for (dim_t a = 0; a < n; ++a) {
+            for (dim_t m = 0; m < order; ++m) didx[m] = a;
+            double term = get_tensor_element_bccs_alt(Ddiag, didx, order);
+            for (dim_t m = 0; m < order; ++m) term *= get_dense_matrix_element(Udense, idx[m], a);
+            s += term;
         }
+        set_tensor_element_bccs(Trec, idx, order, s);
+
+        dim_t pos = order;
+        while (pos > 0 && idx[pos - 1] == n - 1) pos--;
+        if (pos == 0) break;
+        idx[pos - 1]++;
+        for (dim_t m = pos; m < order; ++m) idx[m] = idx[pos - 1];
     }
-    //dump_canonical_elements("reconstructed", Trec, n, 3);
 }
 
-void check_diagonalization_with_reconstruction(FLA_Obj T_final, FLA_Obj U_final, FLA_Obj T_initial, FLA_Obj D_diag, FLA_Obj T_reconstructed, dim_t n, dim_t order, double tolerance) {
-    if (order != 3) {
-        printf("check_diagonalization_with_reconstruction currently expects order=3\n");
-        return;
-    }
-
+void check_diagonalization_with_reconstruction(FLA_Obj T_final, FLA_Obj U_final, FLA_Obj T_initial, dim_t n, dim_t order, double tolerance) {
     DiagonalizationReport r;
-    double sum_offdiag_abs = 0.0;
-    double sum_diag_abs = 0.0;
-    double max_offdiag_abs = 0.0;
-    unsigned long long num_offdiag = 0;
-    unsigned long long num_diag = 0;
-
-    dim_t idx[order];
-    for (dim_t d = 0; d < order; ++d) idx[d] = 0;
-
-    while (1) {
-        double val = get_tensor_element_bccs_alt(T_final, idx, order);
-        double abs_val = fabs(val);
-
-        if (is_superdiagonal(idx, order)) {
-            sum_diag_abs += abs_val;
-            num_diag++;
-        } else {
-            sum_offdiag_abs += abs_val;
-            num_offdiag++;
-            if (abs_val > max_offdiag_abs) max_offdiag_abs = abs_val;
-        }
-
-        if (!next_index(idx, order, n)) break;
-    }
+    EntryStats st = entry_stats(T_final, n, order);
+    double sum_offdiag_abs = st.sum_offdiag_abs, sum_diag_abs = st.sum_diag_abs;
+    double max_offdiag_abs = st.max_offdiag_abs;
+    unsigned long long num_offdiag = st.num_offdiag, num_diag = st.num_diag;
 
     r.diag_norm_sq = diag_norm_sq_tensor(T_final, n, order);
     r.offdiag_norm_sq = offdiag_norm_sq_tensor(T_final, n, order);
@@ -299,19 +291,36 @@ void check_diagonalization_with_reconstruction(FLA_Obj T_final, FLA_Obj U_final,
     r.avg_offdiag_abs = (num_offdiag > 0) ? sum_offdiag_abs / (double)num_offdiag : 0.0;
     r.orthogonality_error = orthogonality_error_matrix(U_final, n);
 
-    extract_diagonal_tensor(T_final, D_diag, n, order);
-    reconstruct_m(D_diag, U_final, T_reconstructed, n);
-
-    tensor_diff_metrics(
-        T_reconstructed,
-        T_initial,
-        n,
-        order,
-        &r.reconstruction_error_abs,
-        &r.reconstruction_error_rel,
-        &r.reconstruction_max_abs,
-        &r.reconstruction_max_rel
-    );
+    // Reconstruction error over canonical entries (non-decreasing index tuples), each
+    // weighted by its number of distinct permutations = order! / prod(run length!).
+    std::vector<double> dvec(n), Ud(n * n);
+    {
+        dim_t didx[FLA_MAX_ORDER];
+        for (dim_t a = 0; a < n; ++a) {
+            for (dim_t m = 0; m < order; ++m) didx[m] = a;
+            dvec[a] = get_tensor_element_bccs_alt(T_final, didx, order);
+            for (dim_t i = 0; i < n; ++i) Ud[i * n + a] = get_dense_matrix_element(U_final, i, a);
+        }
+    }
+    double sum_sq = 0.0, init_sq = 0.0, max_diff = 0.0, max_ref = 0.0;
+    for_each_canonical(n, order, [&](dim_t* cidx, double w){
+        double rec = 0.0;
+        for (dim_t a = 0; a < n; ++a) {
+            double term = dvec[a];
+            for (dim_t m = 0; m < order; ++m) term *= Ud[cidx[m] * n + a];
+            rec += term;
+        }
+        double ref = get_tensor_element_bccs_alt(T_initial, cidx, order);
+        double diff = fabs(rec - ref);
+        sum_sq += w * diff * diff;
+        init_sq += w * ref * ref;
+        if (diff > max_diff) max_diff = diff;
+        if (fabs(ref) > max_ref) max_ref = fabs(ref);
+    });
+    r.reconstruction_error_abs = sqrt(sum_sq);
+    r.reconstruction_error_rel = r.reconstruction_error_abs / fmax(sqrt(init_sq), 1e-300);
+    r.reconstruction_max_abs = max_diff;
+    r.reconstruction_max_rel = max_diff / fmax(max_ref, 1e-300);
 
     printf("\n=== Final diagonalization + reconstruction report ===\n");
     printf("diag_norm_sq = %.15e\n", r.diag_norm_sq);
@@ -329,10 +338,68 @@ void check_diagonalization_with_reconstruction(FLA_Obj T_final, FLA_Obj U_final,
     printf("reconstruction_max_abs = %.15e\n", r.reconstruction_max_abs);
     printf("reconstruction_max_rel = %.15e\n", r.reconstruction_max_rel);
 
-    if (r.max_offdiag_abs < tolerance)
-        printf("diagonalization_check = PASS (max_offdiag_abs < %.2e)\n", tolerance);
+    // tolerance is relative to ||T||_F (scale-free), so the verdict does not depend on the input scale
+    const double abs_tol = tolerance * sqrt(r.frob_norm_sq);
+    if (r.max_offdiag_abs < abs_tol)
+        printf("diagonalization_check = PASS (max_offdiag_abs < %.2e * ||T||_F)\n", tolerance);
     else
-        printf("diagonalization_check = FAIL (max_offdiag_abs >= %.2e)\n", tolerance);
+        printf("diagonalization_check = FAIL (max_offdiag_abs >= %.2e * ||T||_F)\n", tolerance);
 
     printf("================================\n\n");
+}
+
+bool full_reconstruction_report(FLA_Obj T_final, FLA_Obj F, FLA_Obj T_initial, dim_t n, dim_t order){
+    double total = 1.0;
+    for (dim_t m = 0; m < order; ++m) total *= (double)n;
+    if (total * 16.0 > 2.0e9) {
+        printf("full_reconstruction: skipped (n^order scratch = %.2f GB)\n", total * 16.0 / 1e9);
+        return false;
+    }
+    const size_t N = (size_t)total;
+    std::vector<double> cur(N), nxt(N), Ud(n * n);
+    for (dim_t i = 0; i < n; ++i)
+        for (dim_t a = 0; a < n; ++a) Ud[i * n + a] = get_dense_matrix_element(F, i, a);
+
+    // Expand T_final to a dense row-major array (index[0] slowest).
+    dim_t idx[FLA_MAX_ORDER];
+    for (dim_t m = 0; m < order; ++m) idx[m] = 0;
+    for (size_t lin = 0; lin < N; ++lin) {
+        cur[lin] = get_tensor_element_bccs_alt(T_final, idx, order);
+        dim_t m = order;
+        while (m > 0 && ++idx[m - 1] == n) idx[--m] = 0;
+    }
+
+    // Mode products with F: new[..i..] = sum_a F[i,a] * old[..a..]
+    for (dim_t m = 0; m < order; ++m) {
+        size_t outer = 1, inner = 1;
+        for (dim_t k = 0; k < m; ++k) outer *= (size_t)n;
+        for (dim_t k = m + 1; k < order; ++k) inner *= (size_t)n;
+        for (size_t o = 0; o < outer; ++o)
+            for (dim_t i = 0; i < n; ++i)
+                for (size_t in = 0; in < inner; ++in) {
+                    double acc = 0.0;
+                    for (dim_t a = 0; a < n; ++a)
+                        acc += Ud[i * n + a] * cur[(o * n + a) * inner + in];
+                    nxt[(o * n + i) * inner + in] = acc;
+                }
+        cur.swap(nxt);
+    }
+
+    double sum_sq = 0.0, ref_sq = 0.0, max_diff = 0.0, max_ref = 0.0;
+    for (dim_t m = 0; m < order; ++m) idx[m] = 0;
+    for (size_t lin = 0; lin < N; ++lin) {
+        double ref = get_tensor_element_bccs_alt(T_initial, idx, order);
+        double diff = fabs(cur[lin] - ref);
+        sum_sq += diff * diff;
+        ref_sq += ref * ref;
+        if (diff > max_diff) max_diff = diff;
+        if (fabs(ref) > max_ref) max_ref = fabs(ref);
+        dim_t m = order;
+        while (m > 0 && ++idx[m - 1] == n) idx[--m] = 0;
+    }
+    printf("full_reconstruction_error_abs = %.15e\n", sqrt(sum_sq));
+    printf("full_reconstruction_error_rel = %.15e\n", sqrt(sum_sq) / fmax(sqrt(ref_sq), 1e-300));
+    printf("full_reconstruction_max_abs = %.15e\n", max_diff);
+    printf("full_reconstruction_max_rel = %.15e\n", max_diff / fmax(max_ref, 1e-300));
+    return true;
 }
